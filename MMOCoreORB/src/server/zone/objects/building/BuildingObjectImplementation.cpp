@@ -41,6 +41,7 @@
 #include "server/zone/objects/creature/ai/AiAgent.h"
 
 #include "server/zone/objects/building/components/GCWBaseContainerComponent.h"
+#include "server/zone/objects/building/components/EnclaveContainerComponent.h"
 #include "templates/appearance/AppearanceTemplate.h"
 
 void BuildingObjectImplementation::initializeTransientMembers() {
@@ -332,6 +333,12 @@ bool BuildingObjectImplementation::isAllowedEntry(CreatureObject* player) {
 			return true;
 
 		return checkContainerPermission(player,ContainerPermissions::WALKIN);
+	}
+
+	EnclaveContainerComponent* encComp = containerComponent.castTo<EnclaveContainerComponent*>();
+
+	if (encComp != NULL) {
+		return checkContainerPermission(player, ContainerPermissions::WALKIN);
 	}
 
 	if (!isClientObject()) {
@@ -1614,12 +1621,25 @@ Vector<Reference<MeshData*> > BuildingObjectImplementation::getTransformedMeshDa
 	transform.setRotationMatrix(direction.toMatrix3());
 	transform.setTranslation(getPositionX(), getPositionZ(), -getPositionY());
 
+	const auto fullTransform = transform * *parentTransform;
+
 	PortalLayout *pl = getObjectTemplate()->getPortalLayout();
 	if(pl) {
 		if(pl->getCellTotalNumber() > 0) {
 			AppearanceTemplate *appr = pl->getAppearanceTemplate(0);
-			data.addAll(appr->getTransformedMeshData(transform * *parentTransform));
+			FloorMesh *floor = TemplateManager::instance()->getFloorMesh(appr->getFloorMesh());
 
+			if (floor == NULL) {
+				floor = pl->getFloorMesh(0);
+			}
+
+			if (floor != NULL) {
+				data.addAll(floor->getTransformedMeshData(fullTransform));
+			}
+
+#ifndef RENDER_EXTERNAL_FLOOR_MESHES_ONLY
+			data.addAll(appr->getTransformedMeshData(fullTransform));
+#endif
 			const CellProperty* tmpl = pl->getCellProperty(0);
 
 			for (int i=0; i<tmpl->getNumberOfPortals(); i++) {
@@ -1629,10 +1649,14 @@ Vector<Reference<MeshData*> > BuildingObjectImplementation::getTransformedMeshDa
 				if(portal->hasDoorTransform()) {
 					Matrix4 doorTransform = portal->getDoorTransform();
 					doorTransform.swapLtoR();
-					data.add(MeshData::makeCopyNegateZ(mesh, (doorTransform * transform) * *parentTransform));
+					data.emplace(std::move(MeshData::makeCopyNegateZ(mesh, (doorTransform * transform) * *parentTransform)));
 				} else
-					data.add(MeshData::makeCopyNegateZ(mesh, transform * *parentTransform));
+					data.emplace(std::move(MeshData::makeCopyNegateZ(mesh, fullTransform)));
 			}
+
+#ifdef RENDER_EXTERNAL_FLOOR_MESHES_ONLY
+			return data;
+#endif
 		}
 	}
 	data.addAll(SceneObjectImplementation::getTransformedMeshData(parentTransform));

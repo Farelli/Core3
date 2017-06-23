@@ -72,8 +72,24 @@ function VillageJediManager:onPlayerLoggedIn(pPlayer)
 		VillageCommunityCrafting:removeSchematics(pPlayer, 2)
 		VillageCommunityCrafting:removeSchematics(pPlayer, 3)
 	end
-	
+
 	JediTrials:onPlayerLoggedIn(pPlayer)
+
+	local pGhost = CreatureObject(pPlayer):getPlayerObject()
+
+	-- Covers players who had unlocked jedi knight prior to enclave implementation/frs data storage
+	if (pGhost ~= nil) then
+		local playerCouncil = PlayerObject(pGhost):getFrsCouncil()
+		local playerRank = PlayerObject(pGhost):getFrsRank()
+
+		if (playerCouncil == 0 and CreatureObject(pPlayer):hasSkill("force_title_jedi_rank_03")) then
+			local councilType = JediTrials:getJediCouncil(pPlayer)
+
+			if (councilType ~= nil and councilType ~= 0) then
+				PlayerObject(pGhost):setFrsCouncil(councilType)
+			end
+		end
+	end
 end
 
 function VillageJediManager:onPlayerLoggedOut(pPlayer)

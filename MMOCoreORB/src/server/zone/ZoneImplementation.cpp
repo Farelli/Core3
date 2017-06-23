@@ -20,6 +20,7 @@
 
 #include "server/zone/managers/structure/StructureManager.h"
 #include "terrain/ProceduralTerrainAppearance.h"
+#include "server/zone/managers/collision/NavMeshManager.h"
 
 ZoneImplementation::ZoneImplementation(ZoneProcessServer* serv, const String& name) {
 	processor = serv;
@@ -187,6 +188,8 @@ void ZoneImplementation::inRange(QuadTreeEntry* entry, float range) {
 }
 
 int ZoneImplementation::getInRangeSolidObjects(float x, float y, float range, SortedVector<ManagedReference<QuadTreeEntry*> >* objects, bool readLockZone) {
+	objects->setNoDuplicateInsertPlan();
+
 	bool readlock = readLockZone && !_this.getReferenceUnsafeStaticCast()->isLockedByCurrentThread();
 
 	try {
@@ -200,8 +203,8 @@ int ZoneImplementation::getInRangeSolidObjects(float x, float y, float range, So
 	}
 
 	if (objects->size() > 0) {
-		for (int i = objects->size()-1; i >= 0; i--) {
-			SceneObject* sceno = cast<SceneObject*>(objects->get(i).get());
+		for (int i = objects->size() - 1; i >= 0; i--) {
+			SceneObject* sceno = static_cast<SceneObject*>(objects->getUnsafe(i).get());
 
 			if (sceno == NULL || sceno->getParentID() != 0) {
 				objects->remove(i);
@@ -235,6 +238,8 @@ int ZoneImplementation::getInRangeSolidObjects(float x, float y, float range, So
 }
 
 int ZoneImplementation::getInRangeObjects(float x, float y, float range, SortedVector<ManagedReference<QuadTreeEntry*> >* objects, bool readLockZone, bool includeBuildingObjects) {
+	objects->setNoDuplicateInsertPlan();
+
 	bool readlock = readLockZone && !_this.getReferenceUnsafeStaticCast()->isLockedByCurrentThread();
 
 	try {
@@ -251,8 +256,8 @@ int ZoneImplementation::getInRangeObjects(float x, float y, float range, SortedV
 		Vector<ManagedReference<QuadTreeEntry*> > buildingObjects;
 
 		for (int i = 0; i < objects->size(); ++i) {
-			SceneObject* sceneObject = cast<SceneObject*>(objects->get(i).get());
-			BuildingObject* building = dynamic_cast<BuildingObject*>(sceneObject);
+			SceneObject* sceneObject = static_cast<SceneObject*>(objects->getUnsafe(i).get());
+			BuildingObject* building = sceneObject->asBuildingObject();
 
 			if (building != NULL) {
 				for (int j = 1; j <= building->getMapCellSize(); ++j) {
@@ -263,10 +268,10 @@ int ZoneImplementation::getInRangeObjects(float x, float y, float range, SortedV
 							ReadLocker rlocker(cell->getContainerLock());
 
 							for (int h = 0; h < cell->getContainerObjectsSize(); ++h) {
-								ManagedReference<SceneObject*> obj = cell->getContainerObject(h);
+								Reference<SceneObject*> obj = cell->getContainerObject(h);
 
 								if (obj != NULL)
-									buildingObjects.add(obj.get());
+									buildingObjects.emplace(std::move(obj));
 							}
 
 						} catch (...) {
@@ -274,23 +279,25 @@ int ZoneImplementation::getInRangeObjects(float x, float y, float range, SortedV
 					}
 				}
 			} else if (sceneObject != NULL && (sceneObject->isVehicleObject() || sceneObject->isMount())) {
-				ManagedReference<SceneObject*> rider = sceneObject->getSlottedObject("rider");
+				Reference<SceneObject*> rider = sceneObject->getSlottedObject("rider");
 
 				if (rider != NULL)
-					buildingObjects.add(rider.get());
+					buildingObjects.emplace(std::move(rider));
 			}
 		}
 
 		//_this.getReferenceUnsafeStaticCast()->runlock(readlock);
 
 		for (int i = 0; i < buildingObjects.size(); ++i)
-			objects->put(buildingObjects.get(i));
+			objects->put(std::move(buildingObjects.getUnsafe(i)));
 	}
 
 	return objects->size();
 }
 
 int ZoneImplementation::getInRangeObjects(float x, float y, float range, InRangeObjectsVector* objects, bool readLockZone, bool includeBuildingObjects) {
+	objects->setNoDuplicateInsertPlan();
+
 	bool readlock = readLockZone && !_this.getReferenceUnsafeStaticCast()->isLockedByCurrentThread();
 
 	try {
@@ -307,9 +314,9 @@ int ZoneImplementation::getInRangeObjects(float x, float y, float range, InRange
 		Vector<QuadTreeEntry*> buildingObjects;
 
 		for (int i = 0; i < objects->size(); ++i) {
-			SceneObject* sceneObject = static_cast<SceneObject*>(objects->get(i));
+			SceneObject* sceneObject = static_cast<SceneObject*>(objects->getUnsafe(i));
 
-			BuildingObject* building = dynamic_cast<BuildingObject*>(sceneObject);
+			BuildingObject* building = sceneObject->asBuildingObject();
 
 			if (building != NULL) {
 				for (int j = 1; j <= building->getMapCellSize(); ++j) {
@@ -320,7 +327,7 @@ int ZoneImplementation::getInRangeObjects(float x, float y, float range, InRange
 							ReadLocker rlocker(cell->getContainerLock());
 
 							for (int h = 0; h < cell->getContainerObjectsSize(); ++h) {
-								ManagedReference<SceneObject*> obj = cell->getContainerObject(h);
+								Reference<SceneObject*> obj = cell->getContainerObject(h);
 
 								if (obj != NULL)
 									buildingObjects.add(obj.get());
@@ -331,7 +338,7 @@ int ZoneImplementation::getInRangeObjects(float x, float y, float range, InRange
 					}
 				}
 			} else if (sceneObject != NULL && (sceneObject->isVehicleObject() || sceneObject->isMount())) {
-				ManagedReference<SceneObject*> rider = sceneObject->getSlottedObject("rider");
+				Reference<SceneObject*> rider = sceneObject->getSlottedObject("rider");
 
 				if (rider != NULL)
 					buildingObjects.add(rider.get());
@@ -339,7 +346,7 @@ int ZoneImplementation::getInRangeObjects(float x, float y, float range, InRange
 		}
 
 		for (int i = 0; i < buildingObjects.size(); ++i)
-			objects->put(buildingObjects.get(i));
+			objects->put(buildingObjects.getUnsafe(i));
 	}
 
 	return objects->size();
@@ -347,6 +354,7 @@ int ZoneImplementation::getInRangeObjects(float x, float y, float range, InRange
 
 int ZoneImplementation::getInRangeActiveAreas(float x, float y, SortedVector<ManagedReference<ActiveArea*> >* objects, bool readLockZone) {
 	//Locker locker(_this.getReferenceUnsafeStaticCast());
+	objects->setNoDuplicateInsertPlan();
 
 	bool readlock = readLockZone && !_this.getReferenceUnsafeStaticCast()->isLockedByCurrentThread();
 
@@ -355,17 +363,25 @@ int ZoneImplementation::getInRangeActiveAreas(float x, float y, SortedVector<Man
 	Zone* thisZone = _this.getReferenceUnsafeStaticCast();
 
 	try {
+		SortedVector<ManagedReference<QuadTreeEntry*> > entryObjects;
+		SortedVector<ManagedReference<QuadTreeEntry*> > entryObjects2;
+
 		thisZone->rlock(readlock);
 
-		SortedVector<ManagedReference<QuadTreeEntry*> > entryObjects;
-
 		regionTree->inRange(x, y, entryObjects);
+		regionTree->inRange(x, y, 1024, entryObjects2);
 
 		thisZone->runlock(readlock);
 
 		for (int i = 0; i < entryObjects.size(); ++i) {
-			ActiveArea* obj = dynamic_cast<ActiveArea*>(entryObjects.get(i).get());
+			ActiveArea* obj = static_cast<ActiveArea*>(entryObjects.get(i).get());
 			objects->put(obj);
+		}
+
+		for (int i = 0; i < entryObjects2.size(); ++i) {
+			ActiveArea* obj = static_cast<ActiveArea*>(entryObjects2.get(i).get());
+			if (obj->containsPoint(x, y))
+				objects->put(obj);
 		}
 	}catch (...) {
 //		_this.getReferenceUnsafeStaticCast()->runlock(readlock);
@@ -379,14 +395,20 @@ int ZoneImplementation::getInRangeActiveAreas(float x, float y, SortedVector<Man
 }
 
 int ZoneImplementation::getInRangeNavMeshes(float x, float y, SortedVector<ManagedReference<NavArea*> >* objects, bool readlock) {
+	objects->setNoDuplicateInsertPlan();
 
 	Zone* thisZone = _this.getReferenceUnsafeStaticCast();
 
-	SortedVector<ManagedReference<QuadTreeEntry*> > entryObjects;
+	SortedVector<QuadTreeEntry*> entryObjects;
+	SortedVector<QuadTreeEntry*> entryObjects2;
 
 	try {
 		thisZone->rlock(readlock);
+
 		regionTree->inRange(x, y, entryObjects);
+
+		regionTree->inRange(x, y, 1024, entryObjects2);
+
 		thisZone->runlock(readlock);
 	}catch (...) {
 		thisZone->runlock(readlock);
@@ -394,8 +416,19 @@ int ZoneImplementation::getInRangeNavMeshes(float x, float y, SortedVector<Manag
 	}
 
 	for (int i = 0; i < entryObjects.size(); ++i) {
-		NavArea* obj = dynamic_cast<NavArea*>(entryObjects.get(i).get());
-		if (obj)
+		ActiveArea* area = static_cast<ActiveArea*>(entryObjects.getUnsafe(i));
+		NavArea* obj = area->asNavArea();
+
+		if (obj && obj->isNavMeshLoaded() && obj->isInRange(x, y, 256)) {
+			objects->put(obj);
+		}
+	}
+
+	for (int i = 0; i < entryObjects2.size(); ++i) {
+		ActiveArea* area = static_cast<ActiveArea*>(entryObjects2.getUnsafe(i));
+		NavArea* obj = area->asNavArea();
+
+		if (obj && obj->isNavMeshLoaded() && obj->isInRange(x, y, 256))
 			objects->put(obj);
 	}
 
@@ -404,6 +437,7 @@ int ZoneImplementation::getInRangeNavMeshes(float x, float y, SortedVector<Manag
 
 int ZoneImplementation::getInRangeActiveAreas(float x, float y, ActiveAreasVector* objects, bool readLockZone) {
 	//Locker locker(_this.getReferenceUnsafeStaticCast());
+	objects->setNoDuplicateInsertPlan();
 
 	bool readlock = readLockZone && !_this.getReferenceUnsafeStaticCast()->isLockedByCurrentThread();
 
@@ -412,17 +446,26 @@ int ZoneImplementation::getInRangeActiveAreas(float x, float y, ActiveAreasVecto
 	Zone* thisZone = _this.getReferenceUnsafeStaticCast();
 
 	try {
+		SortedVector<QuadTreeEntry*> entryObjects;
+		SortedVector<QuadTreeEntry*> entryObjects2;
+
 		thisZone->rlock(readlock);
 
-		SortedVector<QuadTreeEntry*> entryObjects;
-
 		regionTree->inRange(x, y, entryObjects);
+		regionTree->inRange(x, y, 1024, entryObjects2);
 
 		thisZone->runlock(readlock);
 
 		for (int i = 0; i < entryObjects.size(); ++i) {
-			ActiveArea* obj = dynamic_cast<ActiveArea*>(entryObjects.get(i));
+			ActiveArea* obj = static_cast<ActiveArea*>(entryObjects.getUnsafe(i));
 			objects->put(obj);
+		}
+
+		for (int i = 0; i < entryObjects2.size(); ++i) {
+			ActiveArea* obj = static_cast<ActiveArea*>(entryObjects2.getUnsafe(i));
+
+			if (obj->containsPoint(x, y))
+				objects->put(obj);
 		}
 	}catch (...) {
 //		_this.getReferenceUnsafeStaticCast()->runlock(readlock);
@@ -437,6 +480,7 @@ int ZoneImplementation::getInRangeActiveAreas(float x, float y, ActiveAreasVecto
 
 int ZoneImplementation::getInRangeActiveAreas(float x, float y, float range, ActiveAreasVector* objects, bool readLockZone) {
 	//Locker locker(_this.getReferenceUnsafeStaticCast());
+	objects->setNoDuplicateInsertPlan();
 
 	bool readlock = readLockZone && !_this.getReferenceUnsafeStaticCast()->isLockedByCurrentThread();
 
@@ -445,16 +489,16 @@ int ZoneImplementation::getInRangeActiveAreas(float x, float y, float range, Act
 	Zone* thisZone = _this.getReferenceUnsafeStaticCast();
 
 	try {
-		thisZone->rlock(readlock);
-
 		SortedVector<QuadTreeEntry*> entryObjects;
+
+		thisZone->rlock(readlock);
 
 		regionTree->inRange(x, y, range, entryObjects);
 
 		thisZone->runlock(readlock);
 
 		for (int i = 0; i < entryObjects.size(); ++i) {
-			ActiveArea* obj = dynamic_cast<ActiveArea*>(entryObjects.get(i));
+			ActiveArea* obj = static_cast<ActiveArea*>(entryObjects.getUnsafe(i));
 			objects->put(obj);
 		}
 	}catch (...) {
@@ -470,6 +514,7 @@ int ZoneImplementation::getInRangeActiveAreas(float x, float y, float range, Act
 
 int ZoneImplementation::getInRangeActiveAreas(float x, float y, float range, SortedVector<ManagedReference<ActiveArea*> >* objects, bool readLockZone) {
 	//Locker locker(_this.getReferenceUnsafeStaticCast());
+	objects->setNoDuplicateInsertPlan();
 
 	bool readlock = readLockZone && !_this.getReferenceUnsafeStaticCast()->isLockedByCurrentThread();
 
@@ -478,16 +523,16 @@ int ZoneImplementation::getInRangeActiveAreas(float x, float y, float range, Sor
 	Zone* thisZone = _this.getReferenceUnsafeStaticCast();
 
 	try {
+		SortedVector<QuadTreeEntry*> entryObjects;
+
 		thisZone->rlock(readlock);
-		
-		SortedVector<ManagedReference<QuadTreeEntry*> > entryObjects;
 
 		regionTree->inRange(x, y, range, entryObjects);
 		
 		thisZone->runlock(readlock);
 
 		for (int i = 0; i < entryObjects.size(); ++i) {
-			ActiveArea* obj = dynamic_cast<ActiveArea*>(entryObjects.get(i).get());
+			ActiveArea* obj = static_cast<ActiveArea*>(entryObjects.getUnsafe(i));
 			objects->put(obj);
 		}
 	}catch (...) {
@@ -512,7 +557,8 @@ void ZoneImplementation::updateActiveAreas(TangibleObject* tano) {
 
 	Vector3 worldPos = tano->getWorldPosition();
 
-	SortedVector<ManagedReference<QuadTreeEntry*> > entryObjects;
+	SortedVector<QuadTreeEntry*> entryObjects;
+	SortedVector<QuadTreeEntry*> entryObjects2;
 
 	Zone* managedRef = _this.getReferenceUnsafeStaticCast();
 
@@ -522,6 +568,8 @@ void ZoneImplementation::updateActiveAreas(TangibleObject* tano) {
 
 	try {
 		regionTree->inRange(worldPos.getX(), worldPos.getY(), entryObjects);
+
+		regionTree->inRange(worldPos.getX(), worldPos.getY(), 1024, entryObjects2);
 	} catch (...) {
 		error("unexpeted error caught in void ZoneImplementation::updateActiveAreas(SceneObject* object) {");
 	}
@@ -537,7 +585,7 @@ void ZoneImplementation::updateActiveAreas(TangibleObject* tano) {
 
 		// update old ones
 		for (int i = 0; i < areas.size(); ++i) {
-			ManagedReference<ActiveArea*> area = areas.get(i);
+			ManagedReference<ActiveArea*>& area = areas.getUnsafe(i);
 //			Locker lockerO(object);
 
 //			Locker locker(area, object);
@@ -554,7 +602,23 @@ void ZoneImplementation::updateActiveAreas(TangibleObject* tano) {
 		// we update the ones in quadtree.
 		for (int i = 0; i < entryObjects.size(); ++i) {
 			//update in new ones
-			ActiveArea* activeArea = static_cast<ActiveArea*>(entryObjects.get(i).get());
+			ActiveArea* activeArea = static_cast<ActiveArea*>(entryObjects.getUnsafe(i));
+
+			if (!tano->hasActiveArea(activeArea) && activeArea->containsPoint(worldPos.getX(), worldPos.getY(), tano->getParentID())) {
+				//Locker lockerO(object);
+
+				//Locker locker(activeArea, object);
+
+				tano->addActiveArea(activeArea);
+				activeArea->enqueueEnterEvent(tano);
+				//activeArea->notifyEnter(object);
+			}
+		}
+
+		// we update the ones in quadtree.
+		for (int i = 0; i < entryObjects2.size(); ++i) {
+			//update in new ones
+			ActiveArea* activeArea = static_cast<ActiveArea*>(entryObjects2.getUnsafe(i));
 
 			if (!tano->hasActiveArea(activeArea) && activeArea->containsPoint(worldPos.getX(), worldPos.getY(), tano->getParentID())) {
 				//Locker lockerO(object);
@@ -573,7 +637,7 @@ void ZoneImplementation::updateActiveAreas(TangibleObject* tano) {
 
 			if (worldAreas != NULL) {
 				for (int i = 0; i < worldAreas->size(); ++i) {
-					ActiveArea* activeArea = worldAreas->get(i);
+					ActiveArea* activeArea = worldAreas->get(i).get();
 					Locker lockerO(tano);
 
 					//			Locker locker(activeArea, object);
@@ -723,7 +787,7 @@ Reference<SceneObject*> ZoneImplementation::getNearestPlanetaryObject(SceneObjec
 	Reference<SceneObject*> planetaryObject = NULL;
 
 #ifndef WITH_STM
-	mapLocations->rlock();
+	ReadLocker rlocker(mapLocations);
 #endif
 
 	SortedVector<MapLocationEntry>& sortedVector = mapLocations->getLocation(mapObjectLocationType);
@@ -731,7 +795,7 @@ Reference<SceneObject*> ZoneImplementation::getNearestPlanetaryObject(SceneObjec
 	float distance = 16000.f;
 
 	for (int i = 0; i < sortedVector.size(); ++i) {
-		SceneObject* obj = sortedVector.get(i).getObject();
+		SceneObject* obj = sortedVector.getUnsafe(i).getObject();
 
 		float objDistance = object->getDistanceTo(obj);
 
@@ -741,10 +805,6 @@ Reference<SceneObject*> ZoneImplementation::getNearestPlanetaryObject(SceneObjec
 		}
 	}
 
-#ifndef WITH_STM
-	mapLocations->runlock();
-#endif
-
 	return planetaryObject;
 }
 
@@ -753,23 +813,15 @@ SortedVector<ManagedReference<SceneObject*> > ZoneImplementation::getPlanetaryOb
 	retVector.setNoDuplicateInsertPlan();
 
 #ifndef WITH_STM
-	mapLocations->rlock();
+	ReadLocker rlocker(mapLocations);
 #endif
 
-	try {
-		SortedVector<MapLocationEntry>& entryVector = mapLocations->getLocation(mapObjectLocationType);
+	SortedVector<MapLocationEntry>& entryVector = mapLocations->getLocation(mapObjectLocationType);
 
-		for (int i = 0; i < entryVector.size(); ++i) {
-			MapLocationEntry entry = entryVector.get(i);
-			retVector.put(entry.getObject());
-		}
-	} catch (...) {
-
+	for (int i = 0; i < entryVector.size(); ++i) {
+		MapLocationEntry& entry = entryVector.getUnsafe(i);
+		retVector.put(entry.getObject());
 	}
-
-#ifndef WITH_STM
-	mapLocations->runlock();
-#endif
 
 	return retVector;
 }
@@ -793,6 +845,8 @@ float ZoneImplementation::getMaxY() {
 void ZoneImplementation::updateCityRegions() {
 	bool log = cityRegionUpdateVector.size() > 0;
 	info("scheduling updates for " + String::valueOf(cityRegionUpdateVector.size()) + " cities", log);
+
+	bool forceRebuild = server->shouldDeleteNavAreas();
 
 	for (int i = 0; i < cityRegionUpdateVector.size(); ++i) {
 		CityRegion* city = cityRegionUpdateVector.get(i);
@@ -822,6 +876,8 @@ void ZoneImplementation::updateCityRegions() {
 
 			city->scheduleCitizenAssessment(seconds2);
 		}
+
+		city->createNavMesh(NavMeshManager::MeshQueue, forceRebuild);
 
 		if (!city->isRegistered())
 			continue;

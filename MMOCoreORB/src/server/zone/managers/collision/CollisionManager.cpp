@@ -262,7 +262,7 @@ Vector<float>* CollisionManager::getCellFloorCollision(float x, float y, CellObj
 }
 
 float CollisionManager::getWorldFloorCollision(float x, float y, Zone* zone, bool testWater) {
-	SortedVector<ManagedReference<QuadTreeEntry*> > closeObjects;
+	SortedVector<QuadTreeEntry*> closeObjects;
 	zone->getInRangeObjects(x, y, 128, &closeObjects, true, false);
 
 	PlanetManager* planetManager = zone->getPlanetManager();
@@ -280,8 +280,6 @@ float CollisionManager::getWorldFloorCollision(float x, float y, Zone* zone, boo
 	Vector3 rayStart(x, 16384.f, y);
 	Vector3 rayEnd(x, -16384.f, y);
 
-	Triangle* triangle = NULL;
-
 	if (testWater) {
 		float waterHeight;
 
@@ -290,43 +288,26 @@ float CollisionManager::getWorldFloorCollision(float x, float y, Zone* zone, boo
 				height = waterHeight;
 	}
 
-	float intersectionDistance;
+	for (const auto& entry : closeObjects) {
+		SceneObject* sceno = static_cast<SceneObject*>(entry);
 
-	for (int i = 0; i < closeObjects.size(); ++i) {
-		BuildingObject* building = dynamic_cast<BuildingObject*>(closeObjects.get(i).get());
+		const AppearanceTemplate* app = getCollisionAppearance(sceno, 255);
 
-		if (building == NULL)
+		if (app != NULL) {
+			Ray ray = convertToModelSpace(rayStart, rayEnd, sceno);
+
+			IntersectionResults results;
+
+			app->intersects(ray, 16384 * 2, results);
+
+			if (results.size()) { // results are ordered based on intersection distance from min to max
+				float floorHeight = 16384.f - results.getUnsafe(0).getIntersectionDistance();
+
+				if (floorHeight > height)
+					height = floorHeight;
+			}
+		} else {
 			continue;
-
-		//building->getObjectTemplate()->get
-
-		SharedObjectTemplate* templateObject = building->getObjectTemplate();
-
-		if (templateObject == NULL)
-			continue;
-
-		PortalLayout* portalLayout = templateObject->getPortalLayout();
-
-		if (portalLayout == NULL)
-			continue;
-
-		if (portalLayout->getFloorMeshNumber() == 0)
-			continue;
-
-		//find nearest entrance
-		FloorMesh* exteriorFloorMesh = portalLayout->getFloorMesh(0); // get outside layout
-		AABBTree* aabbTree = exteriorFloorMesh->getAABBTree();
-
-		if (aabbTree == NULL)
-			continue;
-
-		Ray ray = convertToModelSpace(rayStart, rayEnd, building);
-
-		if (aabbTree->intersects(ray, 16384 * 2, intersectionDistance, triangle, true)) {
-			float floorHeight = 16384 - intersectionDistance;
-
-			if (floorHeight > height)
-				height = floorHeight;
 		}
 	}
 
@@ -534,13 +515,13 @@ TriangleNode* CollisionManager::getTriangle(const Vector3& point, FloorMesh* flo
 
 	aabbTree->intersects(ray, 4, intersectionDistance, triangle, true);
 
-	TriangleNode* triangleNode = dynamic_cast<TriangleNode*>(triangle);
-
-	if (triangleNode == NULL) {
+	if (triangle == NULL) {
 		//System::out << "CollisionManager::getTriangle triangleNode NULL" << endl;
 
 		return floor->findNearestTriangle(rayOrigin);
 	}
+
+	TriangleNode* triangleNode = static_cast<TriangleNode*>(triangle);
 
 	return triangleNode;
 }

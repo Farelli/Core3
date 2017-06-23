@@ -54,16 +54,6 @@ void CityRegionImplementation::notifyLoadFromDatabase() {
 
 	if (isRegistered())
 		zone->getPlanetManager()->addRegion(_this.getReferenceUnsafeStaticCast());
-
-	ZoneServer *zServer = ServerCore::getZoneServer();
-	if (zServer != NULL) {
-		bool destroyNavAreas = zServer->shouldDeleteNavAreas();
-
-		if (destroyNavAreas) {
-			destroyNavMesh();
-			createNavMesh();
-		}
-	}
 }
 
 void CityRegionImplementation::initialize() {
@@ -84,6 +74,7 @@ void CityRegionImplementation::initialize() {
 	hasShuttle = false;
 
 	zone = NULL;
+	navMesh = NULL;
 
 	cityUpdateEvent = NULL;
 
@@ -102,7 +93,6 @@ void CityRegionImplementation::initialize() {
 
 	setLoggingName("CityRegion");
 	setLogging(true);
-
 }
 
 void CityRegionImplementation::updateNavmesh(const AABB& bounds, const String& queue) {
@@ -111,24 +101,20 @@ void CityRegionImplementation::updateNavmesh(const AABB& bounds, const String& q
 	if (area == NULL)
 		return;
 
-	RecastNavMesh *navmesh = area->getNavMesh();
-
 	RecastSettings settings;
 
-	if(!isClientRegion()) {
+	if (!isClientRegion()) {
 		settings.m_cellSize = 0.2f;
 		settings.m_cellHeight = 0.2f;
 		settings.m_tileSize = 64.0f;
 		settings.distanceBetweenPoles = 4.0f;
 	}
 
-	if (navmesh == NULL || !navmesh->isLoaded()) {
+	if (!area->isNavMeshLoaded()) {
 		NavMeshManager::instance()->enqueueJob(zone, area, area->getBoundingBox(), settings, queue);
 	} else {
 		NavMeshManager::instance()->enqueueJob(zone, area, bounds, settings, queue);
 	}
-
-
 }
 
 Region* CityRegionImplementation::addRegion(float x, float y, float radius, bool persistent) {
@@ -458,38 +444,45 @@ void CityRegionImplementation::destroyNavMesh() {
 	ManagedReference<NavArea*> strongMesh = navMesh.get();
 
 	if (strongMesh != NULL) {
-		NavMeshManager::instance()->cancelJobs(strongMesh);
 		Locker locker(strongMesh);
 		strongMesh->destroyObjectFromWorld(true);
 
 		if (strongMesh->isPersistent())
 			strongMesh->destroyObjectFromDatabase(true);
+
+		navMesh = NULL;
 	}
 }
 
 void CityRegionImplementation::createNavMesh(const String& queue, bool forceRebuild) {
+	String name = getRegionName();
+	name = name.subString(name.lastIndexOf(':')+1);
+
+	if (!isClientRegion())
+		name = name + "_player_city";
+
+	if (navMesh == NULL) {
+		navMesh = zone->getPlanetManager()->getNavArea(name);
+	}
 
 	if (forceRebuild)
 		destroyNavMesh();
 
-	bool clientRegion = isClientRegion();
-
 	ManagedReference<NavArea*> strongMesh = navMesh.get();
 
 	if (strongMesh != NULL) {
-		RecastNavMesh* mesh = getNavMesh();
-		if (mesh == NULL || !mesh->isLoaded()) {
+		if (!strongMesh->isNavMeshLoaded()) {
 			Reference<CityRegion*> strongRef = _this.getReferenceUnsafeStaticCast();
 
 			Core::getTaskManager()->executeTask([=] {
 				strongRef->updateNavmesh(strongMesh->getBoundingBox(), queue);
 			}, "cityregion_navmesh_update");
-			return;
 		}
+
+		return;
 	}
 
-	strongMesh = zone->getZoneServer()->createObject(STRING_HASHCODE("object/region_navmesh.iff"),
-															!clientRegion).castTo<NavArea *>();
+	strongMesh = zone->getZoneServer()->createObject(STRING_HASHCODE("object/region_navmesh.iff"), "navareas", 1).castTo<NavArea *>();
 
 	if (strongMesh == NULL) {
 		error("Failed to create navmesh region");
@@ -497,9 +490,6 @@ void CityRegionImplementation::createNavMesh(const String& queue, bool forceRebu
 	}
 
 	Locker clocker(strongMesh, _this.getReferenceUnsafeStaticCast());
-
-	String name = getNavMeshName();
-	name = name.subString(name.lastIndexOf(':')+1);
 
 	if (isClientRegion()) {
 		Vector3 center;
@@ -547,15 +537,17 @@ void CityRegionImplementation::createNavMesh(const String& queue, bool forceRebu
 		AABB box(Vector3(minx, miny, minz), Vector3(maxx, maxy, maxz));
 		Vector3 position = Vector3(box.center()[0], 0, box.center()[1]);
 		strongMesh->disableMeshUpdates(true);
-		strongMesh->initializeNavArea(position, box.extents()[box.longestAxis()], zone, name, true, forceRebuild);
+		strongMesh->initializeNavArea(position, box.extents()[box.longestAxis()], zone, name, forceRebuild);
 	} else {
 		Vector3 position = Vector3(getPositionX(), 0, getPositionY());
-		strongMesh->initializeNavArea(position, 480.0f, zone, name, true, forceRebuild);
+		strongMesh->initializeNavArea(position, 480.0f, zone, name, forceRebuild);
 	}
 
 	zone->transferObject(strongMesh, -1, false);
 
 	navMesh = strongMesh;
+
+	zone->getPlanetManager()->addNavArea(name, strongMesh);
 }
 
 void CityRegionImplementation::setZone(Zone* zne) {
@@ -1260,11 +1252,3 @@ void CityRegionImplementation::cleanupMissionTerminals(int limit) {
 uint64 CityRegionImplementation::getObjectID() {
 	return _this.getReferenceUnsafeStaticCast()->_getObjectID();
 }
-
-String CityRegionImplementation::getNavMeshName() {
-	if (navMeshName.length() > 0)
-		return navMeshName;
-
-	return getRegionName();
-}
-

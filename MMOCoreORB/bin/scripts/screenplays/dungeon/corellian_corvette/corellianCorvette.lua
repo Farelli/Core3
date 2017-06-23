@@ -150,6 +150,7 @@ function CorellianCorvette:sendAuthorizationSui(pPlayer, pLeader, pCorvette)
 	local sui = SuiMessageBox.new("CorellianCorvette", "authorizationSuiCallback")
 	sui.setTargetNetworkId(SceneObject(pCorvette):getObjectID())
 	local corvetteName = getStringId("@dungeon/space_dungeon:corvette_" .. self:getBuildingFaction(pCorvette))
+	sui.setTitle("Corellian Corvette")
 	sui.setPrompt(CreatureObject(pLeader):getFirstName() .. " has granted you authorization to travel to " .. corvetteName ..". Do you accept this travel offer?")
 	sui.setOkButtonText("Yes")
 	sui.setCancelButtonText("No")
@@ -727,9 +728,9 @@ function CorellianCorvette:notifyPodRemovedFromZone(pPod)
 
 	local podID = SceneObject(pPod):getObjectID()
 	local areaID = readData(podID .. ":areaID")
-	
+
 	local pArea = getSceneObject(areaID)
-	
+
 	if (pArea ~= nil) then
 		SceneObject(pArea):destroyObjectFromWorld()
 	end
@@ -744,7 +745,7 @@ function CorellianCorvette:notifyPodRadialUsed(pPod, pPlayer, radialSelected)
 		return 1
 	end
 
-	if (pPlayer == nil or not SceneObject(pPlayer):isPlayerCreature()) then
+	if (pPlayer == nil or not SceneObject(pPlayer):isPlayerCreature() or not CreatureObject(pPlayer):isInRangeWithObject(pPod, 4)) then
 		return 0
 	end
 
@@ -952,12 +953,18 @@ function CorellianCorvette:handleCorvetteTimer(pCorvette)
 	if (timeLeft > 10) then
 		self:broadcastToPlayers(pCorvette, "@dungeon/corvette:timer_" .. timeLeft)
 		createEvent(5 * 60 * 1000, "CorellianCorvette", "handleCorvetteTimer", pCorvette, "")
-	elseif (timeLeft > 2) then
+	elseif (timeLeft >= 3) then
 		self:broadcastToPlayers(pCorvette, "@dungeon/corvette:timer_" .. timeLeft)
 		createEvent(60 * 1000, "CorellianCorvette", "handleCorvetteTimer", pCorvette, "")
+	elseif (timeLeft >= 2) then
+		self:broadcastToPlayers(pCorvette, "@dungeon/corvette:timer_" .. timeLeft)
+		createEvent(30 * 1000, "CorellianCorvette", "handleCorvetteTimer", pCorvette, "")
 	elseif (timeLeftSecs >= 90) then
 		self:broadcastToPlayers(pCorvette, "@dungeon/corvette:timer_90s")
-		createEvent(60 * 1000, "CorellianCorvette", "handleCorvetteTimer", pCorvette, "")
+		createEvent(30 * 1000, "CorellianCorvette", "handleCorvetteTimer", pCorvette, "")
+	elseif (timeLeftSecs >= 60) then
+		self:broadcastToPlayers(pCorvette, "@dungeon/corvette:timer_1")
+		createEvent(30 * 1000, "CorellianCorvette", "handleCorvetteTimer", pCorvette, "")
 	elseif (timeLeftSecs >= 30) then
 		self:broadcastToPlayers(pCorvette, "@dungeon/corvette:timer_30s")
 		createEvent(20 * 1000, "CorellianCorvette", "handleCorvetteTimer", pCorvette, "")
@@ -1150,6 +1157,7 @@ function CorellianCorvette:ejectPlayer(pPlayer)
 	if (playerID == ownerID) then
 		if (readData(playerID .. ":corvetteMissionComplete") == 1) then
 			setQuestStatus(playerID .. ":activeCorvetteStep", "3")
+			CreatureObject(pPlayer):sendSystemMessage("@dungeon/corvette:reward") -- You have done well. Return to the person who gave you this assignment and receive your reward.
 			deleteData(playerID .. ":corvetteMissionComplete")
 		else
 			removeQuestStatus(playerID .. ":activeCorvetteQuest")
@@ -1206,6 +1214,28 @@ function CorellianCorvette:doCorvetteCleanup(pCorvette)
 		return
 	end
 
+	local corvetteID = SceneObject(pCorvette):getObjectID()
+
+	for i = 1, #self.electricTrapLocs, 1 do
+		local trapID = readData(corvetteID .. ":electricTrap" .. i)
+		local areaID = readData(trapID .. ":trapArea")
+
+		local pArea = getSceneObject(areaID)
+
+		if (pArea ~= nil) then
+			SceneObject(pArea):destroyObjectFromWorld()
+		end
+
+		local pTrap = getSceneObject(trapID)
+
+		if (pTrap ~= nil) then
+			SceneObject(pTrap):destroyObjectFromWorld()
+		end
+
+		deleteData(trapID .. ":trapArea")
+		deleteData(corvetteID .. ":electricTrap" .. i)
+	end
+
 	for i = 1, 66, 1 do
 		local pCell = BuildingObject(pCorvette):getCell(i)
 
@@ -1220,8 +1250,6 @@ function CorellianCorvette:doCorvetteCleanup(pCorvette)
 		end
 	end
 
-	local corvetteID = SceneObject(pCorvette):getObjectID()
-
 	deleteData(corvetteID .. ":fuelSetting")
 	deleteData(corvetteID .. ":engineSetting")
 	deleteData(corvetteID .. ":hyperdriveSetting")
@@ -1230,13 +1258,6 @@ function CorellianCorvette:doCorvetteCleanup(pCorvette)
 	deleteData(corvetteID .. ":H3P0ID")
 	deleteData(corvetteID .. ":repairDroidComplete")
 	deleteData(corvetteID .. ":ownerID")
-
-	for i = 1, #self.electricTrapLocs, 1 do
-		local trapID = readData(corvetteID .. ":electricTrap" .. i)
-		deleteData(trapID .. ":trapArea")
-		deleteData(corvetteID .. ":electricTrap" .. i)
-	end
-
 	deleteData("corvetteActive:" .. corvetteID)
 	deleteData("corvetteDungeonID:" .. corvetteID)
 	deleteData("corvetteStartTime:" .. corvetteID)

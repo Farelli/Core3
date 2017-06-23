@@ -227,6 +227,8 @@ void SceneObjectImplementation::destroyObjectFromDatabase(bool destroyContainedO
 		assert(0 && "attempting to delete a player creature from database");
 	}
 
+	containerObjects.cancelUnloadTask();
+
 	if(dataObjectComponent != NULL) {
 		dataObjectComponent->notifyObjectDestroyingFromDatabase();
 	}
@@ -995,6 +997,10 @@ void SceneObjectImplementation::updateSavedRootParentRecursive(SceneObject* newR
 	}
 }
 
+uint64 SceneObjectImplementation::getParentID() {
+	return QuadTreeEntryImplementation::parent.getSavedObjectID();
+}
+
 Reference<SceneObject*> SceneObjectImplementation::getParentRecursively(uint32 gameObjectType) {
 	ManagedReference<SceneObject*> temp = getParent().get();
 
@@ -1409,7 +1415,7 @@ void SceneObjectImplementation::getSlottedObjects(VectorMap<String, ManagedRefer
 }
 
 Reference<SceneObject*> SceneObjectImplementation::getSlottedObject(const String& slot) {
-	ManagedReference<SceneObject*> obj = NULL;
+	Reference<SceneObject*> obj;
 
 	ReadLocker locker(&containerLock);
 
@@ -1419,7 +1425,7 @@ Reference<SceneObject*> SceneObjectImplementation::getSlottedObject(const String
 }
 
 Reference<SceneObject*> SceneObjectImplementation::getSlottedObject(int idx) {
-	ManagedReference<SceneObject*> obj = NULL;
+	Reference<SceneObject*> obj;
 
 	ReadLocker locker(&containerLock);
 
@@ -1807,7 +1813,15 @@ Vector<Reference<MeshData*> > SceneObjectImplementation::getTransformedMeshData(
 	transform.setRotationMatrix(direction.toMatrix3());
 	transform.setTranslation(getPositionX(), getPositionZ(), -getPositionY());
 
-	return appearance->getTransformedMeshData(transform * *parentTransform );
+	const auto fullTransform = transform * *parentTransform;
+
+	Vector<Reference<MeshData*>> data = appearance->getTransformedMeshData(fullTransform);
+
+	FloorMesh *floor = TemplateManager::instance()->getFloorMesh(appearance->getFloorMesh());
+	if (floor != NULL)
+		data.addAll(floor->getTransformedMeshData(fullTransform));
+
+	return data;
 }
 
 const BaseBoundingVolume* SceneObjectImplementation::getBoundingVolume() {

@@ -166,7 +166,6 @@ function JediTrials:unlockJediKnight(pPlayer)
 		enclaveName = "Light Jedi Enclave"
 		jediState = 4
 		setFactionVal = FACTIONREBEL
-		skillForceRank = "force_rank_light_novice"
 	elseif (councilType == self.COUNCIL_DARK) then
 		knightRobe = 'object/tangible/wearables/robe/robe_jedi_dark_s01.iff'
 		unlockMusic = "sound/music_become_dark_jedi.snd"
@@ -175,7 +174,6 @@ function JediTrials:unlockJediKnight(pPlayer)
 		enclaveName = "Dark Jedi Enclave"
 		jediState = 8
 		setFactionVal = FACTIONIMPERIAL
-		skillForceRank = "force_rank_dark_novice"
 	else
 		printLuaError("Invalid council type in JediTrials:unlockJediKnight")
 		return
@@ -188,7 +186,8 @@ function JediTrials:unlockJediKnight(pPlayer)
 
 	PlayerObject(pGhost):addWaypoint(enclaveLoc[3], enclaveName, "", enclaveLoc[1], enclaveLoc[2], WAYPOINTYELLOW, true, true, 0)
 	PlayerObject(pGhost):setJediState(jediState)
-	awardSkill(pPlayer, skillForceRank)
+	PlayerObject(pGhost):setFrsCouncil(councilType)
+	PlayerObject(pGhost):setFrsRank(0)
 	CreatureObject(pPlayer):setFactionStatus(2) -- Overt
 	CreatureObject(pPlayer):setFaction(setFactionVal)
 
